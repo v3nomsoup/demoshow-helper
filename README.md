@@ -12,8 +12,8 @@ Each demoshow tab has these columns (row 1 is the header):
 | A | title | filled by `fill_demoshow.py` from the demozoo page |
 | B | group(s) | filled by `fill_demoshow.py` (joined with ` + ` if multiple); may be blank if demozoo has no author |
 | C | link | input: demozoo URL. Cell text and hyperlink are both set to the URL |
-| D | platform | set manually (e.g. `pc 4k`, `Amiga Demo`, `wild`, ...) |
-| E | Party Placement | set manually (1 = compo winner) |
+| D | platform | competition category (e.g. `PC 4K Intro`). Auto-filled from demozoo **only if empty** — keeps your custom shorthand (`pc 4k`, etc.) if already set |
+| E | Party Placement | auto-filled from demozoo (integer, 1 = compo winner). Only written if currently empty |
 | F | YouTube | filled by `fill_demoshow.py` — canonical `https://www.youtube.com/watch?v=...` URL, also as hyperlink |
 | G | runtime | filled by `fill_demoshow.py` — stored as an Excel duration with number format `hh:mm:ss` |
 | H+ | OK / endorsed by / vetoed by / comment | manual |
@@ -24,18 +24,20 @@ The target runtime for a BDSM show is ~2h (see the hint in column L of the heade
 
 1. Create a new tab named e.g. `BDSM - May 2026`.
 2. Add the header row. Easiest is to copy it from the previous month's tab.
-3. For each production you want to include, create a row with **columns C, D, E only**:
-   - **C**: paste the demozoo production URL (Excel will usually auto-hyperlink;
-     if not, Insert → Link). The cell text can be anything — the script uses the
-     hyperlink target.
-   - **D**: platform category (free text; used for grouping when sorting).
-   - **E**: party placement as an integer.
+3. For each production you want to include, paste the demozoo production URL
+   into **column C**. That's the only required input — Excel will usually
+   auto-hyperlink; if not, Insert → Link. The cell text can be anything, the
+   script uses the hyperlink target.
+
+   Optionally pre-fill D (platform) and E (placement) if you want your custom
+   shorthand (e.g. `pc 4k`); otherwise the script uses demozoo's values.
 4. Run the fill script:
    ```
    python3 fill_demoshow.py --sheet 'BDSM - May 2026'
    ```
-   It fills A (title), B (group(s)), F (YouTube), G (runtime). Rows that already
-   have all four filled are skipped — you can re-run safely.
+   It fills A (title), B (group(s)), D (platform, if empty), E (placement, if
+   empty), F (YouTube), G (runtime). Re-running is safe — rows that are already
+   complete are skipped.
 5. Sort the show order:
    ```
    python3 sort_demoshow.py --sheet 'BDSM - May 2026'

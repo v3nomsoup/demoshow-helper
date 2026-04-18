@@ -28,6 +28,8 @@ UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
 COL_TITLE = 1      # A
 COL_GROUPS = 2     # B
 COL_LINK = 3       # C (demozoo URL, used as input)
+COL_PLATFORM = 4   # D (competition category, e.g. "PC 4K Intro")
+COL_PLACEMENT = 5  # E (integer)
 COL_YOUTUBE = 6    # F
 COL_RUNTIME = 7    # G
 RUNTIME_FORMAT = 'hh:mm:ss'
@@ -60,7 +62,7 @@ def fetch(url, timeout=30, attempts=5):
 
 
 def parse_demozoo(html):
-    """Return dict(title, groups: list[str], youtube: url or None, pouet: url or None)."""
+    """Return dict(title, groups: list[str], competition, placement, youtube, pouet)."""
     title = None
     m = re.search(r'<div class="production_title[^"]*">\s*<h2>([^<]+)</h2>', html)
     if m:
@@ -80,6 +82,21 @@ def parse_demozoo(html):
             groups = re.findall(r'<a[^>]*href="/sceners/\d+/"[^>]*>([^<]+)</a>', h3)
         groups = [g.strip() for g in groups]
 
+    # Party placement + competition category
+    # HTML shape: <li> Nth in the <a href="/parties/<id>/#competition_<id>">Party Year Category competition</a> </li>
+    placement = None
+    competition = None
+    m = re.search(
+        r'<li>\s*(\d+)(?:st|nd|rd|th)\s+in\s+the\s*'
+        r'<a[^>]*href="/parties/[^"]*#competition_\d+"[^>]*>([^<]+)</a>',
+        html, re.DOTALL,
+    )
+    if m:
+        placement = int(m.group(1))
+        name = re.sub(r'\s+competition$', '', m.group(2).strip(), flags=re.IGNORECASE)
+        m2 = re.match(r'^.+?\b\d{4}\b\s+(.*)$', name)  # strip "<party> <year> " prefix
+        competition = m2.group(1).strip() if m2 else name
+
     youtube = extract_youtube(html)
 
     # Pouët production link (used as fallback when demozoo has no YouTube)
@@ -88,7 +105,11 @@ def parse_demozoo(html):
     if m:
         pouet = m.group(0)
 
-    return {'title': title, 'groups': groups, 'youtube': youtube, 'pouet': pouet}
+    return {
+        'title': title, 'groups': groups,
+        'competition': competition, 'placement': placement,
+        'youtube': youtube, 'pouet': pouet,
+    }
 
 
 def extract_youtube(html):
@@ -148,16 +169,18 @@ def collect_rows(ws):
         if not target or 'demozoo.org' not in target:
             continue
         title = ws.cell(row=r, column=COL_TITLE).value
-        groups = ws.cell(row=r, column=COL_GROUPS).value
         yt = ws.cell(row=r, column=COL_YOUTUBE).value
         rt = ws.cell(row=r, column=COL_RUNTIME).value
-        # Re-fetch demozoo if title OR YT is missing (groups can legitimately be blank).
-        needs_dz = (not title) or (not yt)
+        platform = ws.cell(row=r, column=COL_PLATFORM).value
+        placement = ws.cell(row=r, column=COL_PLACEMENT).value
+        # Re-fetch demozoo if title, YT, platform, or placement is missing.
+        needs_dz = (not title) or (not yt) or (not platform) or (placement in (None, ''))
         needs_yt = bool(yt) and not rt
         yield r, target, needs_dz, needs_yt
 
 
-def write_row(ws, r, dz_url, title, groups, youtube, runtime_seconds):
+def write_row(ws, r, dz_url, title, groups, competition, placement,
+              youtube, runtime_seconds):
     if title:
         ws.cell(row=r, column=COL_TITLE, value=title)
     if groups:
@@ -165,6 +188,12 @@ def write_row(ws, r, dz_url, title, groups, youtube, runtime_seconds):
     # Canonicalize demozoo link: cell text = URL, hyperlink = URL
     ws.cell(row=r, column=COL_LINK, value=dz_url)
     ws.cell(row=r, column=COL_LINK).hyperlink = dz_url
+    # Platform / placement: only fill if empty — users often keep a custom short
+    # taxonomy (e.g. "pc 4k" instead of "PC 4K Intro") and we don't want to clobber it.
+    if competition and not ws.cell(row=r, column=COL_PLATFORM).value:
+        ws.cell(row=r, column=COL_PLATFORM, value=competition)
+    if placement is not None and ws.cell(row=r, column=COL_PLACEMENT).value in (None, ''):
+        ws.cell(row=r, column=COL_PLACEMENT, value=placement)
     yt_url = normalize_youtube(youtube)
     if yt_url:
         c = ws.cell(row=r, column=COL_YOUTUBE, value=yt_url)
@@ -261,6 +290,8 @@ def main():
             ws, r, dz_url,
             title=dz.get('title') or ws.cell(row=r, column=COL_TITLE).value,
             groups=dz.get('groups'),
+            competition=dz.get('competition'),
+            placement=dz.get('placement'),
             youtube=dz.get('youtube') or ws.cell(row=r, column=COL_YOUTUBE).value,
             runtime_seconds=yt_results.get(r),
         )
@@ -269,7 +300,8 @@ def main():
     print(f'Saved {args.file}.', file=sys.stderr)
 
     # --- Summary ---
-    total = timedelta()
+    from datetime import time as _time
+    total_s = 0
     missing_yt, missing_grp = [], []
     for r in range(2, ws.max_row + 1):
         yt = ws.cell(row=r, column=COL_YOUTUBE).value
@@ -278,14 +310,17 @@ def main():
         link = ws.cell(row=r, column=COL_LINK).hyperlink
         if not link:
             continue
+        # openpyxl may read a duration cell back as either timedelta or datetime.time
+        # depending on the number_format; handle both.
         if isinstance(rt, timedelta):
-            total += rt
+            total_s += int(rt.total_seconds())
+        elif isinstance(rt, _time):
+            total_s += rt.hour * 3600 + rt.minute * 60 + rt.second
         if not yt:
             missing_yt.append(r)
         if not grp:
             missing_grp.append(r)
-    s = int(total.total_seconds())
-    print(f'\nTotal runtime: {s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}')
+    print(f'\nTotal runtime: {total_s // 3600}:{(total_s % 3600) // 60:02d}:{total_s % 60:02d}')
     print(f'Missing YouTube: {missing_yt}')
     print(f'Missing group(s): {missing_grp}')
 
