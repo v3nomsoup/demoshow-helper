@@ -1,0 +1,16 @@
+# Local working file (user's real data — may contain private comments/veto notes)
+Demoshows.xlsx
+Demoshows.xlsx.bak
+Demoshows.xlsx.*.bak
+*.presort.bak
+
+# Office / LibreOffice lock files
+.~lock.*#
+
+# Claude Code local state
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
